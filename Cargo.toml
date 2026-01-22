@@ -1,0 +1,13 @@
+[package]
+name = "ev3dev-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ev3dev-rs = {git = "https://github.com/shaggysa/ev3dev-rs.git"}
+tokio = {version = "1.49.0", features = ["macros", "rt", "rt-multi-thread"]}
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "s"
