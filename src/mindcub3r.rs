@@ -2,7 +2,7 @@ use std::{cell::Cell, time::Duration};
 
 use ev3dev_rs::{
     Ev3Error, Ev3Result,
-    parameters::{SensorPort, Stop},
+    parameters::SensorPort,
     pupdevices::{ColorSensor, InfraredSensor, Motor, UltrasonicSensor},
     tools::wait,
 };
@@ -25,21 +25,29 @@ impl DistanceSensor {
         }
     }
 
-    fn cube_present(&self) -> bool {
+    async fn cube_present(&self) -> Ev3Result<bool> {
         match self {
-            // the distance sensor sometimes sends invalid data, so
-            // we retry until we get a valid reading
-            DistanceSensor::Ultrasonic(sensor) => loop {
-                if let Ok(distance) = sensor.distance_cm() {
-                    return distance < 10.0;
+            // take five samples over 25 ms to prevent
+            // an outlier from causing a false positive
+            DistanceSensor::Ultrasonic(sensor) => {
+                for _ in 0..5 {
+                    if sensor.distance_cm()? > 7.0 {
+                        return Ok(false);
+                    }
+                    wait(Duration::from_millis(5)).await;
                 }
-            },
+                Ok(true)
+            }
 
-            DistanceSensor::Infrared(sensor) => loop {
-                if let Ok(prox) = sensor.proximity() {
-                    return prox < 5;
+            DistanceSensor::Infrared(sensor) => {
+                for _ in 0..5 {
+                    if sensor.proximity()? > 5 {
+                        return Ok(false);
+                    }
+                    wait(Duration::from_millis(5)).await;
                 }
-            },
+                Ok(true)
+            }
         }
     }
 }
@@ -87,8 +95,8 @@ impl Mindcub3r {
     }
 
     pub async fn wait_for_cube(&self) -> Ev3Result<()> {
-        while !self.distance_sensor.cube_present() {
-            wait(Duration::from_millis(100)).await;
+        while !self.distance_sensor.cube_present().await? {
+            wait(Duration::from_millis(75)).await;
         }
         // wait an additional 2 seconds to allow
         //  the user to move out of the way
