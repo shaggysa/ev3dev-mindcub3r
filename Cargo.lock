@@ -37,7 +37,7 @@ dependencies = [
 [[package]]
 name = "ev3dev-rs"
 version = "0.1.0"
-source = "git+https://github.com/shaggysa/ev3dev-rs.git#ff7dcb579221964f9e0a8dae749b08bb0c692265"
+source = "git+https://github.com/shaggysa/ev3dev-rs.git#41ee932ff0d16f4d018422dfc8062cb241b57778"
 dependencies = [
  "fixed",
  "scopeguard",
@@ -84,9 +84,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74d9a594b72ae6656596548f56f667211f8a97b3d4c3d467150794690dc40a"
+checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
 ]
