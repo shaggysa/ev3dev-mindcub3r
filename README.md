@@ -4,7 +4,8 @@
 # Supported platforms
 - Linux is natively supported. 
 - Windows can be used with WSL2. 
-- MacOS is not supported at this time.  
+- MacOS is untested but should be supported. 
+If something doesn't work, please open an issue.  
 
 
 ### Windows setup (WSL)
@@ -28,7 +29,7 @@ to be installed on Windows for code linting or autocompletion to work properly.
 
 
 ### 1: Connect to the robot
-If using WSL, use the [official tutorial](https://www.ev3dev.org/docs/tutorials/connecting-to-the-internet-via-bluetooth/) for Windows.
+If using Windows(WSL) or MacOS, use the [official Windows tutorial](https://www.ev3dev.org/docs/tutorials/connecting-to-the-internet-via-bluetooth/?tabs-0=windows-7) or the [official MacOS tutorial](https://www.ev3dev.org/docs/tutorials/using-bluetooth-tethering/).
 If using native Linux, see [my tutorial](./LINUXTETHERING.md).
 
 ### 2: Install required packages
@@ -47,6 +48,11 @@ sudo dnf groupinstall "Development Tools"
 Arch
 ```bash
 sudo pacman -S git make upx curl base-devel
+```
+
+MacOS
+```bash
+brew install upx gcc
 ```
 
 ### 3: Install rustup and add the armv5 target for the robot
