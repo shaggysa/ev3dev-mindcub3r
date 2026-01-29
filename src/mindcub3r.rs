@@ -1,10 +1,10 @@
 use std::{cell::Cell, time::Duration};
 
 use ev3dev_rs::{
-    Ev3Error, Ev3Result,
-    parameters::SensorPort,
-    pupdevices::{ColorSensor, InfraredSensor, Motor, UltrasonicSensor},
+    join, parameters::SensorPort, pupdevices::{ColorSensor, InfraredSensor, Motor, UltrasonicSensor},
     tools::wait,
+    Ev3Error,
+    Ev3Result,
 };
 
 /// An enum representing an ultrasonic sensor or an infrared sensor.
@@ -31,7 +31,7 @@ impl DistanceSensor {
             // an outlier from causing a false positive
             DistanceSensor::Ultrasonic(sensor) => {
                 for _ in 0..5 {
-                    if sensor.distance_cm()? > 7.0 {
+                    if dbg!(sensor.distance_cm()?) > 8.0 {
                         return Ok(false);
                     }
                     wait(Duration::from_millis(5)).await;
@@ -50,6 +50,16 @@ impl DistanceSensor {
             }
         }
     }
+}
+
+#[derive(Debug)]
+pub enum CubeColor {
+    White,
+    Red,
+    Yellow,
+    Orange,
+    Green,
+    Blue,
 }
 
 pub struct Mindcub3r {
@@ -99,14 +109,61 @@ impl Mindcub3r {
             wait(Duration::from_millis(75)).await;
         }
         // wait an additional 2 seconds to allow
-        //  the user to move out of the way
+        // the user to move out of the way
         wait(Duration::from_secs(2)).await;
         Ok(())
     }
 
-    pub async fn flip_cube(&self) -> Ev3Result<()> {
-        self.flipper_motor.run_target(600, 180).await?;
+    fn get_square_color(&self) -> Ev3Result<CubeColor> {
+        let (r, g, b) = self.color_sensor.raw_rgb()?;
+
+        let max_val = r.max(g).max(b);
+        let min_val = r.min(g).min(b);
+
+        // Check for white (high values across all channels)
+        // min_val > 0.6 * 1020 = 612
+        if min_val > 612 {
+            return Ok(CubeColor::White);
+        }
+
+        // Check for yellow (high red and green, low blue)
+        // r > 510, g > 510, b < 408
+        if r > 510 && g > 510 && b < 408 {
+            return Ok(CubeColor::Yellow);
+        }
+
+        // Check for orange (high red, medium green, low blue)
+        // r > 510, 255 < g < 612, b < 306
+        if r > 510 && g > 255 && g < 612 && b < 306 {
+            return Ok(CubeColor::Orange);
+        }
+
+        // Determine color based on which channel is dominant
+        // r > g * 1.3 becomes r * 10 > g * 13
+        if r == max_val && r * 10 > g * 13 {
+            Ok(CubeColor::Red)
+        } else if g == max_val && g * 10 > r * 12 {
+            Ok(CubeColor::Green)
+        } else if b == max_val {
+            Ok(CubeColor::Blue)
+        } else {
+            // Fallback
+            Ok(CubeColor::White)
+        }
+    }
+
+    pub async fn flip_and_reset(&self) -> Ev3Result<()> {
+        self.flipper_motor.run_target(500, 195).await?;
+        self.flipper_motor.run_target(500, 0).await
+    }
+
+    pub async fn reset_flipper(&self) -> Ev3Result<()> {
         self.flipper_motor.run_target(1000, 0).await
+    }
+
+    pub async fn flip_and_hold(&self) -> Ev3Result<()> {
+        self.flipper_motor.run_target(500, 195).await?;
+        self.flipper_motor.run_target(500, 110).await
     }
 
     pub async fn hold_cube(&self) -> Ev3Result<()> {
@@ -114,10 +171,28 @@ impl Mindcub3r {
     }
 
     /// twist the platform by the given angle
+    ///
+    /// this accounts for the gear ratio between
+    /// the motor and the platform
     pub async fn twist_cube(&self, angle: i32) -> Ev3Result<()> {
+        // the gear ratio between the motor and the platform is 3:1
         self.platform_position.update(|pos| pos + angle * 3);
+
         self.platform_motor
             .run_target(1000, self.platform_position.get())
             .await
+    }
+
+    pub async fn scan_side(&self) -> Ev3Result<()> {
+        self.color_motor.run_target(1000, 765).await?;
+        dbg!(self.color_sensor.raw_rgb()?);
+
+        loop {
+            join!(self.color_motor.run_target(1000, 900), self.twist_cube(45))?;
+            dbg!(self.get_square_color()?);
+
+            join!(self.color_motor.run_target(1000, 830), self.twist_cube(45))?;
+            dbg!(self.get_square_color()?);
+        }
     }
 }
