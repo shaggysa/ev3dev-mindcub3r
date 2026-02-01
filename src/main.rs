@@ -25,6 +25,7 @@ async fn main() -> Ev3Result<()> {
 
     mindcub3r.wait_for_cube().await?;
     mindcub3r.scan_side().await?;
+    mindcub3r.scan_side().await?;
 
     Ok(())
 }
