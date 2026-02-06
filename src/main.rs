@@ -38,6 +38,7 @@ async fn main() -> Ev3Result<()> {
     mindcub3r.flip_and_hold().await?;
     mindcub3r.flip_and_reset().await?;
     mindcub3r.scan_side().await?;
+    mindcub3r.scan_side().await?;
 
     Ok(())
 }
