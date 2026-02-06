@@ -1,9 +1,9 @@
 mod mindcub3r;
 
+use crate::mindcub3r::{DistanceSensor, Mindcub3r};
 use ev3dev_rs::parameters::{Direction, MotorPort, SensorPort};
 use ev3dev_rs::pupdevices::{ColorSensor, Motor};
 use ev3dev_rs::Ev3Result;
-use mindcub3r::{DistanceSensor, Mindcub3r};
 
 #[tokio::main]
 async fn main() -> Ev3Result<()> {
@@ -24,6 +24,19 @@ async fn main() -> Ev3Result<()> {
     .await?;
 
     mindcub3r.wait_for_cube().await?;
+
+    for _ in 0..4 {
+        mindcub3r.scan_side().await?;
+        mindcub3r.reset_color_motor().await?;
+        mindcub3r.flip_and_reset().await?;
+    }
+
+    mindcub3r.twist_cube(90).await?;
+    mindcub3r.flip_and_reset().await?;
+    mindcub3r.scan_side().await?;
+    mindcub3r.reset_color_motor().await?;
+    mindcub3r.flip_and_hold().await?;
+    mindcub3r.flip_and_reset().await?;
     mindcub3r.scan_side().await?;
 
     Ok(())

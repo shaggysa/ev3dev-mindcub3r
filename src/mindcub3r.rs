@@ -52,7 +52,7 @@ impl DistanceSensor {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum CubeColor {
     White,
     Red,
@@ -114,42 +114,63 @@ impl Mindcub3r {
         Ok(())
     }
 
-    fn get_square_color(&self) -> Ev3Result<CubeColor> {
-        let (r, g, b) = self.color_sensor.raw_rgb()?;
+    async fn get_square_color(&self) -> Ev3Result<CubeColor> {
+        let (mut r, mut g, mut b) = (0, 0, 0);
+        let found: CubeColor;
+
+        for _ in 0..5 {
+            let (r_curr, g_curr, b_curr) = self.color_sensor.raw_rgb()?;
+            r += r_curr;
+            g += g_curr;
+            b += b_curr;
+            wait(Duration::from_millis(5)).await;
+        }
+
+        r /= 5;
+        g /= 5;
+        b /= 5;
 
         let max_val = r.max(g).max(b);
         let min_val = r.min(g).min(b);
 
-        // Check for white (high values across all channels)
-        // min_val > 0.6 * 1020 = 612
-        if min_val > 612 {
-            return Ok(CubeColor::White);
+        // Check for white (all channels high and balanced)
+        // White: (179, 179, 253), (256, 249, 327)
+        if min_val > 150 && max_val > 200 {
+            found = CubeColor::White;
+        }
+        // Check for yellow (high red and green, lower blue)
+        // Yellow: (177, 166, 85), (186, 165, 88)
+        else if r > 150 && g > 140 && b < 120 {
+            found = CubeColor::Yellow;
+        }
+        // Check for orange (red dominant, high values, g close to b)
+        // Orange: (237, 95, 81)
+        else if r > 200 && g > 70 && g < 150 && b < 120 {
+            found = CubeColor::Orange;
+        }
+        // Check for blue (blue is clearly dominant and high)
+        // Blue: (41, 42, 117)
+        else if b == max_val && b > 100 {
+            found = CubeColor::Blue;
+        }
+        // Check for green (green is clearly dominant)
+        // Green: (57, 133, 93), (53, 126, 78)
+        else if g == max_val && g > r && g > b {
+            found = CubeColor::Green;
+        }
+        // Check for red (red dominant, lower values OR g > b significantly)
+        // Red: (84, 42, 44), (144, 41, 68)
+        else if r == max_val && r > 70 {
+            found = CubeColor::Red;
+        }
+        // Fallback
+        else {
+            found = CubeColor::White;
         }
 
-        // Check for yellow (high red and green, low blue)
-        // r > 510, g > 510, b < 408
-        if r > 510 && g > 510 && b < 408 {
-            return Ok(CubeColor::Yellow);
-        }
+        println!("r: {}, g: {}, b: {}, detected: {:?}", r, g, b, found);
 
-        // Check for orange (high red, medium green, low blue)
-        // r > 510, 255 < g < 612, b < 306
-        if r > 510 && g > 255 && g < 612 && b < 306 {
-            return Ok(CubeColor::Orange);
-        }
-
-        // Determine color based on which channel is dominant
-        // r > g * 1.3 becomes r * 10 > g * 13
-        if r == max_val && r * 10 > g * 13 {
-            Ok(CubeColor::Red)
-        } else if g == max_val && g * 10 > r * 12 {
-            Ok(CubeColor::Green)
-        } else if b == max_val {
-            Ok(CubeColor::Blue)
-        } else {
-            // Fallback
-            Ok(CubeColor::White)
-        }
+        Ok(found)
     }
 
     pub async fn flip_and_reset(&self) -> Ev3Result<()> {
@@ -159,6 +180,10 @@ impl Mindcub3r {
 
     pub async fn reset_flipper(&self) -> Ev3Result<()> {
         self.flipper_motor.run_target(1000, 0).await
+    }
+
+    pub async fn reset_color_motor(&self) -> Ev3Result<()> {
+        self.color_motor.run_target(1000, 420).await
     }
 
     pub async fn flip_and_hold(&self) -> Ev3Result<()> {
@@ -183,16 +208,20 @@ impl Mindcub3r {
             .await
     }
 
-    pub async fn scan_side(&self) -> Ev3Result<()> {
+    pub async fn scan_side(&self) -> Ev3Result<[CubeColor; 9]> {
         self.color_motor.run_target(1000, 765).await?;
-        dbg!(self.color_sensor.raw_rgb()?);
 
-        loop {
+        let mut arr = [CubeColor::White; 9];
+        arr[0] = self.get_square_color().await?;
+
+        for i in (1..9).step_by(2) {
             join!(self.color_motor.run_target(1000, 900), self.twist_cube(45))?;
-            dbg!(self.get_square_color()?);
+            arr[i] = self.get_square_color().await?;
 
             join!(self.color_motor.run_target(1000, 830), self.twist_cube(45))?;
-            dbg!(self.get_square_color()?);
+            arr[i + 1] = self.get_square_color().await?;
         }
+
+        Ok(arr)
     }
 }
