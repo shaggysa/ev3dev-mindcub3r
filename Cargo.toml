@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ev3dev-rs = "0.2.2"
+ev3dev-rs = "0.3.0"
 tokio = { version = "1.49.0", features = ["macros", "rt", "rt-multi-thread"] }
+ureq = { version = "2.12.1", default-features = false }
+nanoserde = "0.2.1"
+phf = { version = "0.13.1", features = ["macros"] }
+
 
 [profile.release]
 strip = true

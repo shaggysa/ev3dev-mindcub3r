@@ -1,76 +1,79 @@
-use std::{cell::Cell, time::Duration};
-
+use crate::color_resolver::ColorRef;
+pub(crate) use crate::distance_sensor::DistanceSensor;
 use ev3dev_rs::{
-    join, parameters::SensorPort, pupdevices::{ColorSensor, InfraredSensor, Motor, UltrasonicSensor},
+    pupdevices::{ColorSensor, Motor},
     tools::wait,
-    Ev3Error,
     Ev3Result,
 };
+use std::io::BufRead;
+use std::{cell::Cell, time::Duration};
 
-/// An enum representing an ultrasonic sensor or an infrared sensor.
-/// This allows them to be used interchangeably in the Mindcub3r struct.
-pub enum DistanceSensor {
-    Ultrasonic(UltrasonicSensor),
-    Infrared(InfraredSensor),
+pub const FLIP_SPEED: i32 = 400;
+pub const COLOR_WAIT_TIME: Duration = Duration::from_millis(500);
+
+pub const COLOR_POSITIONS: [i32; 9] = [690, 525, 590, 535, 590, 530, 590, 535, 585];
+
+#[derive(Copy, Clone)]
+pub struct CalibrationData {
+    pub colors: [ColorRef; 6],
 }
 
-impl DistanceSensor {
-    pub fn new(port: SensorPort) -> Ev3Result<Self> {
-        if let Ok(ultrasonic_sensor) = UltrasonicSensor::new(port) {
-            Ok(DistanceSensor::Ultrasonic(ultrasonic_sensor))
-        } else if let Ok(infrared_sensor) = InfraredSensor::new(port) {
-            Ok(DistanceSensor::Infrared(infrared_sensor))
+impl CalibrationData {
+    pub fn new() -> Option<Self> {
+        if let Ok(file) = std::fs::File::open(".ev3dev-mindcub3r-calibration") {
+            let reader = std::io::BufReader::new(file);
+
+            let mut arr = [ColorRef { r: 0, g: 0, b: 0 }; 6];
+
+            for line in reader.lines() {
+                let line = line.expect("failed to read line from calibration file");
+                let like = line.trim();
+                if like.is_empty() {
+                    continue;
+                }
+                // Parse format: "color: r, g, b"
+                let parts: Vec<&str> = line.split(':').collect();
+                if parts.len() != 2 {
+                    continue;
+                }
+
+                let color_name = parts[0].trim();
+                let rgb_parts: Vec<&str> = parts[1].split(',').collect();
+                if rgb_parts.len() != 3 {
+                    continue;
+                }
+
+                let r: u16 = rgb_parts[0].trim().parse().unwrap();
+                let g: u16 = rgb_parts[1].trim().parse().unwrap();
+                let b: u16 = rgb_parts[2].trim().parse().unwrap();
+
+                match color_name {
+                    "white" => arr[0] = ColorRef { r, g, b },
+                    "blue" => arr[1] = ColorRef { r, g, b },
+                    "yellow" => arr[2] = ColorRef { r, g, b },
+                    "green" => arr[3] = ColorRef { r, g, b },
+                    "orange" => arr[4] = ColorRef { r, g, b },
+                    "red" => arr[5] = ColorRef { r, g, b },
+                    _ => continue,
+                }
+            }
+
+            Some(Self { colors: arr })
         } else {
-            Err(Ev3Error::NoSensorProvided)
+            None
         }
     }
-
-    async fn cube_present(&self) -> Ev3Result<bool> {
-        match self {
-            // take five samples over 25 ms to prevent
-            // an outlier from causing a false positive
-            DistanceSensor::Ultrasonic(sensor) => {
-                for _ in 0..5 {
-                    if dbg!(sensor.distance_cm()?) > 8.0 {
-                        return Ok(false);
-                    }
-                    wait(Duration::from_millis(5)).await;
-                }
-                Ok(true)
-            }
-
-            DistanceSensor::Infrared(sensor) => {
-                for _ in 0..5 {
-                    if sensor.proximity()? > 5 {
-                        return Ok(false);
-                    }
-                    wait(Duration::from_millis(5)).await;
-                }
-                Ok(true)
-            }
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum CubeColor {
-    White,
-    Red,
-    Yellow,
-    Orange,
-    Green,
-    Blue,
 }
 
 pub struct Mindcub3r {
     flipper_motor: Motor,
     platform_motor: Motor,
-    color_motor: Motor,
-    color_sensor: ColorSensor,
+    pub color_motor: Motor,
+    pub color_sensor: ColorSensor,
     distance_sensor: DistanceSensor,
     platform_position: Cell<i32>,
+    pub calibration_data: Option<CalibrationData>,
 }
-
 impl Mindcub3r {
     // initialize the Mindcub3r and return an object
     pub async fn new(
@@ -101,6 +104,7 @@ impl Mindcub3r {
             color_sensor,
             distance_sensor,
             platform_position: Cell::new(0),
+            calibration_data: CalibrationData::new(),
         })
     }
 
@@ -108,78 +112,25 @@ impl Mindcub3r {
         while !self.distance_sensor.cube_present().await? {
             wait(Duration::from_millis(75)).await;
         }
-        // wait an additional 2 seconds to allow
+        // wait an additional 1.5 seconds to allow
         // the user to move out of the way
-        wait(Duration::from_secs(2)).await;
+        wait(Duration::from_millis(1500)).await;
         Ok(())
     }
 
-    async fn get_square_color(&self) -> Ev3Result<CubeColor> {
-        let (mut r, mut g, mut b) = (0, 0, 0);
-        let found: CubeColor;
-
-        for _ in 0..5 {
-            let (r_curr, g_curr, b_curr) = self.color_sensor.raw_rgb()?;
-            r += r_curr;
-            g += g_curr;
-            b += b_curr;
-            wait(Duration::from_millis(5)).await;
-        }
-
-        r /= 5;
-        g /= 5;
-        b /= 5;
-
-        let max_val = r.max(g).max(b);
-        let min_val = r.min(g).min(b);
-
-        // Check for white (all channels high and balanced)
-        // White: (179, 179, 253), (256, 249, 327)
-        if min_val > 150 && max_val > 200 {
-            found = CubeColor::White;
-        }
-        // Check for yellow (high red and green, lower blue)
-        // Yellow: (177, 166, 85), (186, 165, 88)
-        else if r > 150 && g > 140 && b < 120 {
-            found = CubeColor::Yellow;
-        }
-        // Check for orange (red dominant, high values, g close to b)
-        // Orange: (237, 95, 81)
-        else if r > 200 && g > 70 && g < 150 && b < 120 {
-            found = CubeColor::Orange;
-        }
-        // Check for blue (blue is clearly dominant and high)
-        // Blue: (41, 42, 117)
-        else if b == max_val && b > 100 {
-            found = CubeColor::Blue;
-        }
-        // Check for green (green is clearly dominant)
-        // Green: (57, 133, 93), (53, 126, 78)
-        else if g == max_val && g > r && g > b {
-            found = CubeColor::Green;
-        }
-        // Check for red (red dominant, lower values OR g > b significantly)
-        // Red: (84, 42, 44), (144, 41, 68)
-        else if r == max_val && r > 70 {
-            found = CubeColor::Red;
-        }
-        // Fallback
-        else {
-            found = CubeColor::White;
-        }
-
-        println!("r: {}, g: {}, b: {}, detected: {:?}", r, g, b, found);
-
-        Ok(found)
+    pub async fn position_flipper(&self) -> Ev3Result<()> {
+        self.flipper_motor.run_target(FLIP_SPEED, 140).await?;
+        self.reset_flipper().await
     }
 
     pub async fn flip_and_reset(&self) -> Ev3Result<()> {
-        self.flipper_motor.run_target(500, 195).await?;
-        self.flipper_motor.run_target(500, 0).await
+        self.flipper_motor.run_target(FLIP_SPEED, 220).await?;
+        self.reset_flipper().await
     }
 
     pub async fn reset_flipper(&self) -> Ev3Result<()> {
-        self.flipper_motor.run_target(1000, 0).await
+        self.flipper_motor.run_target(FLIP_SPEED, 65).await?;
+        self.flipper_motor.run_target(150, 20).await
     }
 
     pub async fn reset_color_motor(&self) -> Ev3Result<()> {
@@ -187,12 +138,12 @@ impl Mindcub3r {
     }
 
     pub async fn flip_and_hold(&self) -> Ev3Result<()> {
-        self.flipper_motor.run_target(500, 195).await?;
-        self.flipper_motor.run_target(500, 110).await
+        self.flipper_motor.run_target(FLIP_SPEED, 220).await?;
+        self.flipper_motor.run_target(FLIP_SPEED, 110).await
     }
 
     pub async fn hold_cube(&self) -> Ev3Result<()> {
-        self.flipper_motor.run_target(1000, 90).await
+        self.flipper_motor.run_target(FLIP_SPEED, 90).await
     }
 
     /// twist the platform by the given angle
@@ -204,24 +155,7 @@ impl Mindcub3r {
         self.platform_position.update(|pos| pos + angle * 3);
 
         self.platform_motor
-            .run_target(1000, self.platform_position.get())
+            .run_target(500, self.platform_position.get())
             .await
-    }
-
-    pub async fn scan_side(&self) -> Ev3Result<[CubeColor; 9]> {
-        self.color_motor.run_target(1000, 765).await?;
-
-        let mut arr = [CubeColor::White; 9];
-        arr[0] = self.get_square_color().await?;
-
-        for i in (1..9).step_by(2) {
-            join!(self.color_motor.run_target(1000, 900), self.twist_cube(45))?;
-            arr[i] = self.get_square_color().await?;
-
-            join!(self.color_motor.run_target(1000, 830), self.twist_cube(45))?;
-            arr[i + 1] = self.get_square_color().await?;
-        }
-
-        Ok(arr)
     }
 }

@@ -75,3 +75,6 @@ deploy:
 	echo ""
 run:
 	@ssh $(TARGET) brickrun -r ./$(ARTIFACT)
+
+calibrate: build deploy
+	@ssh $(TARGET) brickrun -r ./$(ARTIFACT) calibrate
